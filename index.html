@@ -1,0 +1,1657 @@
+<meta charset="utf-8">
+<title>Chemical Tank Forecast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: control-room console — summary first, then one full-width chart per tank, then deliveries. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --sunk: #eef1f4;
+  --ink: #0e1720;
+  --ink-2: #44515e;
+  --muted: #7a8794;
+  --line: #dde3e9;
+  --accent: #2a78d6;
+  --accent-ink: #1d5fb0;
+  --crit: #d03b3b;
+  --warn: #e39b00;
+  --warn-ink: #9a6a00;
+  --good: #0f8a3c;
+  --ideal: #7b4fd0;
+  --f-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1317; --surface: #171c21; --sunk: #1d2329; --ink: #eef2f5; --ink-2: #b6c0c9;
+    --muted: #808c97; --line: #29313a; --accent: #4b93e8; --accent-ink: #8bbcf3;
+    --crit: #e45a5a; --warn: #f0b429; --warn-ink: #f0b429; --good: #34b866; --ideal: #a68bf0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1317; --surface: #171c21; --sunk: #1d2329; --ink: #eef2f5; --ink-2: #b6c0c9;
+  --muted: #808c97; --line: #29313a; --accent: #4b93e8; --accent-ink: #8bbcf3;
+  --crit: #e45a5a; --warn: #f0b429; --warn-ink: #f0b429; --good: #34b866; --ideal: #a68bf0; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.45; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 20px 64px; display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h1 { font-size: 28px; font-weight: 700; }
+h2 { font-size: 20px; font-weight: 600; }
+h3 { font-size: 18px; font-weight: 600; }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: .9em; }
+.muted { color: var(--muted); }
+.eyebrow { font-family: var(--f-display); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* header */
+header.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.title-block { display: grid; gap: 2px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.field { display: grid; gap: 4px; }
+.field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 7px 9px; min-width: 0; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { font: inherit; font-weight: 600; cursor: pointer; border-radius: var(--r); padding: 7px 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button.ghost { background: transparent; border-color: transparent; color: var(--accent-ink); padding-inline: 8px; }
+button.ghost:hover { background: var(--sunk); }
+button.danger { color: var(--crit); }
+button.danger.armed { background: var(--crit); border-color: var(--crit); color: #fff; }
+
+section { display: grid; gap: 12px; min-width: 0; }
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+
+/* overview table */
+.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+th { font-family: var(--f-display); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--sunk); }
+tr:last-child td { border-bottom: 0; }
+td.r, th.r { text-align: right; }
+tbody tr.link { cursor: pointer; }
+tbody tr.link:hover td { background: var(--sunk); }
+.chem-name { font-weight: 600; }
+
+/* tank gauge: horizontal sight glass with alarm ticks */
+.gauge { position: relative; width: 150px; height: 14px; background: var(--sunk); border-radius: 3px; overflow: hidden; }
+.gauge .band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.gauge .fill { position: absolute; left: 0; top: 4px; bottom: 4px; background: var(--accent); border-radius: 2px; }
+.gauge .fill.low { background: var(--crit); }
+.gauge .tick { position: absolute; top: 0; bottom: 0; width: 2px; }
+.gauge .tick.alarm { background: var(--crit); }
+.gauge .tick.cush { background: var(--warn); }
+
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.status::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.status.ok { color: var(--good); }
+.status.warn { color: var(--warn-ink); }
+.status.crit { color: var(--crit); }
+
+/* legend */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { display: inline-block; width: 22px; height: 0; border-top: 2px solid; }
+.sw.level { border-color: var(--accent); border-top-width: 3px; }
+.sw.cush { border-color: var(--warn); border-top-style: dotted; }
+.sw.alarm { border-color: var(--crit); border-top-style: dashed; }
+.sw.down { height: 12px; border: 0; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 35%, transparent) 0 3px, transparent 3px 6px); border-radius: 2px; }
+.mk { color: var(--accent); font-size: 12px; }
+
+/* chemical tabs */
+.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.tab { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; background: transparent; border: 0; border-bottom: 3px solid transparent;
+  border-radius: 0; padding: 10px 14px 9px; color: var(--ink-2); font-family: var(--f-display); font-size: 16px; font-weight: 600; }
+.tab:hover { color: var(--ink); background: var(--sunk); border-color: transparent; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+.dot.warn { background: var(--warn); }
+.dot.crit { background: var(--crit); }
+#tabpanel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h4 { font-family: var(--f-display); font-size: 15px; font-weight: 600; margin: 0; }
+.next { display: grid; gap: 8px; padding: 6px 0 12px; }
+.next-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.next .table-scroll { border-radius: 4px; }
+tr.beyond td { background: color-mix(in srgb, var(--sunk) 60%, transparent); }
+.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-2); }
+.dt-row.rule input[type="number"] { width: 72px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 16px 6px; display: grid; gap: 6px; min-width: 0; scroll-margin-top: 16px; }
+.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 8px 16px; }
+.card-head .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+.card-head .actions { display: flex; gap: 6px; align-items: center; }
+.chart { width: 100%; height: 340px; min-width: 0; }
+.err { color: var(--crit); font-size: 14px; padding: 10px 0; }
+
+/* downtimes */
+.dt-list { display: grid; gap: 8px; }
+.dt-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dt-row input { width: 200px; max-width: 100%; }
+.dt-row .dur { font-size: 13px; color: var(--muted); min-width: 60px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 10px; }
+
+/* dialogs */
+dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); background: var(--surface); color: var(--ink); }
+dialog::backdrop { background: rgba(8, 12, 16, .45); }
+.dlg { display: grid; gap: 18px; padding: 20px; }
+.dlg-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; position: sticky; bottom: 0; background: var(--surface); padding: 14px 20px; border-top: 1px solid var(--line); }
+.dlg-foot .right { display: flex; gap: 8px; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
+legend { font-family: var(--f-display); font-weight: 600; font-size: 15px; padding: 0; margin-bottom: 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.grid .wide { grid-column: 1 / -1; }
+.hint { font-size: 13px; color: var(--muted); }
+.form-err { color: var(--crit); font-size: 14px; font-weight: 500; }
+textarea { width: 100%; min-height: 260px; font-family: var(--f-mono); font-size: 12.5px; }
+.kind { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; }
+.kind.booked { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.kind.pred { color: var(--ink-2); border-color: var(--line); border-style: dashed; }
+.flag { color: var(--crit); font-weight: 600; font-size: 13px; }
+.flag.warn { color: var(--warn-ink); }
+.import-line { font-size: 13px; color: var(--muted); }
+.drop { position: fixed; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 82%, transparent); z-index: 50; padding: 16px; }
+.drop div { border: 2px dashed var(--accent); border-radius: 12px; padding: 40px 32px; background: var(--surface); font-family: var(--f-display); font-size: 22px; font-weight: 600; text-align: center; }
+.import-sum { display: grid; gap: 6px; margin: 0; padding-left: 18px; }
+.import-warn { display: grid; gap: 4px; margin: 0; padding-left: 18px; color: var(--warn-ink); font-size: 14px; }
+.add-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.add-row .field input, .add-row .field select { width: 150px; max-width: 100%; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: var(--r); font-size: 14px; font-weight: 500; }
+/* page switcher */
+.pages { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: -12px; overflow-x: auto; }
+.pages a { font-family: var(--f-display); font-size: 17px; font-weight: 600; color: var(--ink-2); text-decoration: none; padding: 10px 16px 9px; border-bottom: 3px solid transparent; white-space: nowrap; }
+.pages a:hover { color: var(--ink); background: var(--sunk); }
+.pages a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+.pages a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.page { display: grid; gap: 28px; min-width: 0; }
+
+/* ideal schedule overlay */
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink-2); cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.toggle:hover { border-color: var(--muted); }
+.toggle input { accent-color: var(--ideal); width: 16px; height: 16px; margin: 0; }
+.toggle:has(input:checked) { border-color: color-mix(in srgb, var(--ideal) 55%, transparent); color: var(--ink); }
+.kind.ideal { color: var(--ideal); border-color: color-mix(in srgb, var(--ideal) 50%, transparent); border-style: dashed; }
+.sw.ideal { border-color: var(--ideal); border-top-style: dashed; }
+.mk.ideal { color: var(--ideal); }
+tr.ideal-row td { background: color-mix(in srgb, var(--ideal) 5%, transparent); }
+.head-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* key metrics */
+.metrics td:first-child { color: var(--ink-2); font-weight: 500; }
+.metrics td.v { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 13.5px; font-weight: 500; }
+.metrics td.d { color: var(--muted); font-size: 13.5px; white-space: normal; min-width: 220px; }
+.v.crit { color: var(--crit); } .v.warn { color: var(--warn-ink); } .v.ok { color: var(--good); }
+.timeline { width: 100%; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) { .card { transition: box-shadow .2s; } }
+.card.flash { box-shadow: 0 0 0 2px var(--accent); }
+@media (max-width: 560px) { .wrap { padding-inline: 16px; } .chart { height: 300px; } h1 { font-size: 24px; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="title-block">
+      <span class="eyebrow">Chemical storage · level forecast</span>
+      <h1>Chemical Tank Forecast</h1>
+      <span class="muted" id="asof"></span>
+      <span class="import-line" id="import-line"></span>
+    </div>
+    <div class="controls">
+      <button id="btn-xlsx" type="button">Import Excel</button>
+      <input id="xlsx-file" type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden>
+      <label class="field"><span>Horizon</span>
+        <select id="horizon">
+          <option value="72">3 days</option><option value="168">7 days</option>
+          <option value="336">14 days</option><option value="720">30 days</option>
+        </select>
+      </label>
+      <label class="field"><span>Time step</span>
+        <select id="step">
+          <option value="1">1 min</option><option value="5">5 min</option><option value="15">15 min</option>
+        </select>
+      </label>
+      <button id="btn-io" type="button">Import / export</button>
+      <button id="btn-add" type="button" class="primary">Add chemical</button>
+    </div>
+  </header>
+
+  <nav class="pages" aria-label="Pages">
+    <a href="#tanks" data-page="tanks">Tanks</a>
+    <a href="#deliveries" data-page="deliveries">Delivery schedule</a>
+  </nav>
+
+  <div class="page" id="page-tanks">
+  <section aria-labelledby="h-overview">
+    <div class="section-head">
+      <h2 id="h-overview">Overview</h2>
+      <span class="hint">Click a row to open its tab.</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Chemical</th><th class="r">Now (kg)</th><th>Tank</th><th class="r">Runs out in</th><th>Usage</th>
+          <th>Next order</th><th>Next delivery</th><th class="r">Lowest (kg)</th><th>Status</th>
+        </tr></thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-levels">
+    <div class="section-head">
+      <h2 id="h-levels">Tank levels</h2>
+      <label class="toggle"><input type="checkbox" class="ideal-toggle"> Overlay ideal schedule</label>
+    </div>
+    <div class="section-head">
+      <div class="legend">
+        <span><i class="sw level"></i>Level</span>
+        <span><i class="mk">▲</i>Booked delivery</span>
+        <span><i class="mk">△</i>Predicted delivery</span>
+        <span><i class="mk">○</i>Cushion order</span>
+        <span><i class="sw cush"></i>Cushions</span>
+        <span><i class="sw alarm"></i>LSL / LSH</span>
+        <span><i class="sw down"></i>Downtime</span>
+        <span data-ideal-only hidden><i class="sw ideal"></i>Ideal level</span>
+        <span data-ideal-only hidden><i class="mk ideal">◇</i>Ideal delivery</span>
+      </div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Chemicals" id="tabs"></div>
+    <div role="tabpanel" id="tabpanel" tabindex="0"></div>
+    <span class="hint">Drag across the chart to zoom, double-click to reset. Use the arrow keys to move between tabs.</span>
+  </section>
+
+  <section aria-labelledby="h-down">
+    <div class="section-head">
+      <h2 id="h-down">Plant downtimes</h2>
+      <span class="hint">No consumption on any tank. Deliveries still arrive.</span>
+    </div>
+    <div class="panel">
+      <h4>Repeating</h4>
+      <div class="dt-list" id="plant-rules"></div>
+      <div><button type="button" class="ghost" id="plant-rule-add">+ Add repeating downtime</button></div>
+      <h4>One-off</h4>
+      <div class="dt-list" id="plant-dt"></div>
+      <div><button type="button" class="ghost" id="plant-dt-add">+ Add one-off downtime</button></div>
+    </div>
+  </section>
+
+  </div>
+
+  <div class="page" id="page-deliveries" hidden>
+  <section aria-labelledby="h-del">
+    <div class="section-head">
+      <h2 id="h-del">Delivery schedule</h2>
+      <div class="head-tools">
+        <label class="field"><span>Chemical</span><select id="sched-filter"></select></label>
+        <label class="toggle"><input type="checkbox" class="ideal-toggle"> Overlay ideal schedule</label>
+        <button type="button" id="btn-csv">Copy as CSV</button>
+      </div>
+    </div>
+    <span class="hint">Everything arriving within the chart horizon. Booked deliveries come from your Excel import. After a chemical's last booking, predicted deliveries follow its regular amount and frequency, or are ordered at the lower cushion if it has no frequency set. <span data-ideal-only hidden>Ideal deliveries arrive just as the level falls to the point where a full delivery fits under the upper cushion (never below the lower cushion), so each tank stays in its operating band with as few deliveries as possible.</span></span>
+    <div class="card"><div class="timeline" id="timeline"></div></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Chemical</th><th>Type</th><th>Supplier</th><th>Order placed</th><th>Arrives</th><th class="r">Level at arrival</th><th class="r">Qty (kg)</th><th class="r">Level after</th><th>Check</th><th data-ideal-only hidden>vs ideal</th></tr></thead>
+        <tbody id="schedule"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-booked">
+    <div class="section-head">
+      <h2 id="h-booked">Booked deliveries</h2>
+      <span class="hint" id="booked-count"></span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Chemical</th><th>Arrives</th><th class="r">Qty (kg)</th><th>Supplier</th><th></th></tr></thead>
+        <tbody id="booked"></tbody>
+      </table>
+    </div>
+    <form class="panel add-row" id="booked-form">
+      <label class="field"><span>Chemical</span><select id="bk-chem"></select></label>
+      <label class="field"><span>Arrives</span><input id="bk-at" type="datetime-local" required></label>
+      <label class="field"><span>Qty (kg)</span><input id="bk-qty" type="number" step="any" min="0" required></label>
+      <label class="field"><span>Supplier</span><input id="bk-sup"></label>
+      <button type="submit">Add delivery</button>
+    </form>
+  </section>
+  </div>
+</div>
+
+<!-- chemical editor -->
+<dialog id="dlg-chem">
+  <form id="chem-form" method="dialog">
+    <div class="dlg">
+      <h3 id="chem-title">Edit chemical</h3>
+      <fieldset>
+        <legend>Tank</legend>
+        <div class="grid">
+          <label class="field wide"><span>Name</span><input id="f-name" required></label>
+          <label class="field"><span>Current level (kg)</span><input id="f-level_kg" type="number" step="any" min="0" required></label>
+          <label class="field"><span>Capacity (kg)</span><input id="f-capacity" type="number" step="any" min="0" placeholder="optional"></label>
+          <label class="field"><span>LSL (kg)</span><input id="f-lsl" type="number" step="any" min="0" required></label>
+          <label class="field"><span>Lower cushion (kg)</span><input id="f-lower_cushion" type="number" step="any" min="0" required></label>
+          <label class="field"><span>Upper cushion (kg)</span><input id="f-upper_cushion" type="number" step="any" min="0" required></label>
+          <label class="field"><span>LSH (kg)</span><input id="f-lsh" type="number" step="any" min="0" required></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Deliveries</legend>
+        <div class="grid">
+          <label class="field"><span>Lead time (h)</span><input id="f-lead_time_h" type="number" step="any" min="0"></label>
+          <label class="field"><span>Delivery size (kg)</span><input id="f-delivery_kg" type="number" step="any" min="0" placeholder="fill to upper"></label>
+          <label class="field"><span>Delivery every (days)</span><input id="f-delivery_every_days" type="number" step="any" min="0" placeholder="at lower cushion"></label>
+          <label class="field"><span>Default supplier</span><input id="f-supplier" placeholder="optional"></label>
+          <label class="field wide"><span>Next regular delivery (only used when nothing is booked)</span><input id="f-next_delivery" type="datetime-local"></label>
+        </div>
+        <span class="hint">With a frequency set, predicted deliveries arrive every N days after the last booked one. Without one, an order goes out when the level reaches the lower cushion. Leave delivery size empty to fill to the upper cushion.</span>
+      </fieldset>
+      <fieldset>
+        <legend>Consumption</legend>
+        <div class="grid">
+          <label class="field"><span>Continuous (kg/h)</span><input id="f-rate_kg_h" type="number" step="any" min="0"></label>
+          <label class="field"><span>Batch size (kg)</span><input id="f-batch_kg" type="number" step="any" min="0"></label>
+          <label class="field"><span>Batch every (h)</span><input id="f-batch_every_h" type="number" step="any" min="0" placeholder="no repeat"></label>
+          <label class="field"><span>Batch duration (h)</span><input id="f-batch_duration_h" type="number" step="any" min="0"></label>
+          <label class="field wide"><span>First repeating batch</span><input id="f-first_batch" type="datetime-local"></label>
+          <label class="field wide"><span>One-off batches (comma-separated dates or hours from now)</span><input id="f-batch_times" placeholder="e.g. 2026-10-09T08:00, 30"></label>
+        </div>
+        <span class="hint">Duration 0 draws the whole batch at once. Continuous and batch use add together.</span>
+      </fieldset>
+      <fieldset>
+        <legend>Downtimes for this chemical only</legend>
+        <div class="dt-list" id="chem-dt"></div>
+        <div><button type="button" class="ghost" id="chem-dt-add">+ Add downtime</button></div>
+      </fieldset>
+      <p class="form-err" id="chem-err" hidden></p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="danger" id="chem-del">Delete</button>
+      <div class="right">
+        <button type="button" id="chem-cancel">Cancel</button>
+        <button type="submit" class="primary" id="chem-save">Save</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<!-- import / export -->
+<dialog id="dlg-io">
+  <div class="dlg">
+    <h3>Import / export</h3>
+    <p class="hint">This is the same format that <span class="num">python main.py --config file.json</span> reads. Edit it here and apply, paste in a saved setup, or load a file.</p>
+    <textarea id="io-text" spellcheck="false"></textarea>
+    <label class="field"><span>Load from file</span><input id="io-file" type="file" accept=".json,application/json"></label>
+    <p class="form-err" id="io-err" hidden></p>
+  </div>
+  <div class="dlg-foot">
+    <button type="button" class="danger" id="io-reset">Reset to example</button>
+    <div class="right">
+      <button type="button" id="io-copy">Copy</button>
+      <button type="button" id="io-close">Close</button>
+      <button type="button" class="primary" id="io-apply">Apply</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- excel import preview -->
+<dialog id="dlg-xlsx">
+  <div class="dlg">
+    <h3>Import from Excel</h3>
+    <p class="hint" id="xlsx-file-name"></p>
+    <ul class="import-sum" id="xlsx-sum"></ul>
+    <ul class="import-warn" id="xlsx-warn"></ul>
+    <p class="hint">Tank rows update the chemical with the same name and keep its usage, batches and cushions. Booked deliveries replace the current list.</p>
+  </div>
+  <div class="dlg-foot">
+    <span></span>
+    <div class="right">
+      <button type="button" id="xlsx-cancel">Cancel</button>
+      <button type="button" class="primary" id="xlsx-apply">Apply import</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="drop" id="drop" hidden><div>Drop your Excel file to import</div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+/* ======================================================================
+   Model — mirrors the Chemical dataclass in main.py
+   ====================================================================== */
+const STORE_KEY = "tank-forecast-v1";
+const pad = n => String(n).padStart(2, "0");
+const fmtLocal = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const nowMinute = () => { const d = new Date(); d.setSeconds(0, 0); return d; };
+const addH = (d, h) => new Date(d.getTime() + h * 3.6e6);
+
+/* Plant downtimes that repeat: 30 min every other day, and a 24 h shutdown every 20 days.
+   `first` is the start of the next occurrence; edit it in the Plant downtimes panel. */
+function defaultRules(n) {
+  const at = (days, hh) => { const d = new Date(n); d.setDate(d.getDate() + days); d.setHours(hh, 0, 0, 0); return fmtLocal(d); };
+  return [
+    { label: "Short stop", every_days: 2, duration_h: 0.5, first: at(1, 6) },
+    { label: "Shutdown", every_days: 20, duration_h: 24, first: at(10, 6) },
+  ];
+}
+
+function exampleState() {
+  const n = nowMinute();
+  const at = h => fmtLocal(addH(n, h));
+  return loadState({
+    horizon_h: 336, step_min: 1,
+    downtimes: [],
+    downtime_rules: defaultRules(n),
+    chemicals: [
+      { name: "Caustic (NaOH)", level_kg: 820, rate_kg_h: 9, lsl: 150, lower_cushion: 300, upper_cushion: 1600, lsh: 1800, capacity: 2000, lead_time_h: 12,
+        delivery_kg: 1400, delivery_every_days: 7, supplier: "Example Supplier A" },
+      { name: "Hydrochloric acid", level_kg: 450, rate_kg_h: 5, lsl: 80, lower_cushion: 200, upper_cushion: 900, lsh: 1000, capacity: 1100,
+        delivery_kg: 600, delivery_every_days: 5, supplier: "Example Supplier B" },
+      { name: "Sodium hypochlorite", level_kg: 1300, rate_kg_h: 12, lsl: 200, lower_cushion: 400, upper_cushion: 1700, lsh: 1900, capacity: 2100, lead_time_h: 24,
+        delivery_kg: 1150, delivery_every_days: 4, supplier: "Example Supplier A" },
+      { name: "Coagulant", level_kg: 900, rate_kg_h: 0, lsl: 100, lower_cushion: 250, upper_cushion: 1200, lsh: 1400, capacity: 1500, lead_time_h: 8,
+        batch_kg: 150, batch_every_h: 12, batch_duration_h: 2, first_batch_h: at(3), downtimes: [[at(200), at(236)]] },
+      { name: "Antiscalant", level_kg: 400, rate_kg_h: 0.8, lsl: 40, lower_cushion: 100, upper_cushion: 500, lsh: 560, capacity: 600,
+        batch_kg: 60, batch_every_h: 8, first_batch_h: at(1) },
+    ],
+    // example bookings — replaced by your Excel import
+    deliveries: [
+      { chemical: "Caustic (NaOH)", at: at(30), qty: 1200, supplier: "Example Supplier A" },
+      { chemical: "Hydrochloric acid", at: at(20), qty: 500, supplier: "Example Supplier B" },
+      { chemical: "Sodium hypochlorite", at: at(50), qty: 900, supplier: "Example Supplier A" },
+    ],
+    import_info: null,
+  });
+}
+
+const optNum = v => (v == null || v === "" || !isFinite(+v) ? null : +v);
+function normChem(c) {
+  return {
+    name: String(c.name ?? "Unnamed"), supplier: String(c.supplier ?? ""), level_kg: +c.level_kg || 0, rate_kg_h: +c.rate_kg_h || 0,
+    lsl: +c.lsl, lower_cushion: +c.lower_cushion, upper_cushion: +c.upper_cushion, lsh: +c.lsh,
+    capacity: optNum(c.capacity),
+    delivery_kg: optNum(c.delivery_kg),
+    delivery_every_days: optNum(c.delivery_every_days) || null,   // regular delivery frequency; null = order at lower cushion
+    next_delivery: c.next_delivery ? String(c.next_delivery) : "",   // optional anchor for the regular pattern
+    lead_time_h: +c.lead_time_h || 0,
+    batch_kg: +c.batch_kg || 0,
+    batch_every_h: optNum(c.batch_every_h) || null,
+    first_batch_h: c.first_batch_h ?? 0,
+    batch_duration_h: +c.batch_duration_h || 0,
+    batch_times_h: Array.isArray(c.batch_times_h) ? c.batch_times_h : [],
+    downtimes: Array.isArray(c.downtimes) ? c.downtimes : [],
+  };
+}
+
+/* Times are "hours from now" numbers or local date strings; pin numbers to dates on import. */
+function absolutize(v, start) {
+  if (typeof v === "number" || (typeof v === "string" && v.trim() !== "" && !isNaN(+v))) return fmtLocal(addH(start, +v));
+  return String(v).trim().replace(" ", "T").slice(0, 16);
+}
+function loadState(raw) {
+  const start = nowMinute();
+  const obj = Array.isArray(raw) ? { chemicals: raw } : raw;
+  if (!obj || !Array.isArray(obj.chemicals)) throw new Error("Expected a list of chemicals, or an object with a \"chemicals\" list.");
+  const chems = obj.chemicals.map(normChem).map(c => ({
+    ...c,
+    first_batch_h: absolutize(c.first_batch_h, start),
+    next_delivery: c.next_delivery ? absolutize(c.next_delivery, start) : "",
+    batch_times_h: c.batch_times_h.map(v => absolutize(v, start)),
+    downtimes: c.downtimes.map(w => [absolutize(w[0], start), absolutize(w[1], start)]),
+  }));
+  return {
+    horizon_h: +obj.horizon_h || 336, step_min: +obj.step_min || 1,
+    downtimes: (obj.downtimes || []).map(w => [absolutize(w[0], start), absolutize(w[1], start)]),
+    downtime_rules: (Array.isArray(obj.downtime_rules) ? obj.downtime_rules : defaultRules(start)).map(r => ({
+      label: String(r.label ?? ""), every_days: +r.every_days || 0, duration_h: +r.duration_h || 0, first: absolutize(r.first ?? 0, start),
+    })),
+    chemicals: chems,
+    deliveries: (obj.deliveries || []).map(d => ({
+      chemical: String(d.chemical), at: absolutize(d.at, start), qty: +d.qty || 0, supplier: String(d.supplier ?? ""),
+    })),
+    import_info: obj.import_info || null,
+  };
+}
+
+function validate(c) {
+  const cap = c.capacity ?? Infinity;
+  if ([c.lsl, c.lower_cushion, c.upper_cushion, c.lsh].some(v => !isFinite(v)))
+    return "Enter LSL, both cushions and LSH.";
+  if (!(0 <= c.lsl && c.lsl < c.lower_cushion && c.lower_cushion < c.upper_cushion && c.upper_cushion <= c.lsh && c.lsh <= cap))
+    return "Levels must be in order: LSL < lower cushion < upper cushion ≤ LSH ≤ capacity.";
+  if (c.rate_kg_h < 0 || c.batch_kg < 0 || c.batch_duration_h < 0 || c.lead_time_h < 0) return "Rates, batch sizes and times can't be negative.";
+  if (c.delivery_kg != null && c.delivery_kg <= 0) return "Delivery size must be above 0, or left empty to fill to the upper cushion.";
+  if (c.delivery_every_days != null && c.delivery_every_days < 0) return "Delivery frequency must be above 0 days.";
+  if (c.batch_every_h != null && c.batch_every_h < 0) return "Batch interval must be above 0.";
+  if (c.batch_every_h && c.batch_duration_h > c.batch_every_h) return "Batch duration is longer than the batch interval.";
+  return null;
+}
+
+/* ======================================================================
+   Simulation — fixed time step, same rules as main.py
+   ====================================================================== */
+const toHours = (v, start) => {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "" && !isNaN(+v)) return +v;
+  return (new Date(String(v).replace(" ", "T")).getTime() - start.getTime()) / 3.6e6;
+};
+
+function batchStarts(c, horizon, start) {
+  const out = c.batch_times_h.map(v => toHours(v, start)).filter(isFinite);
+  if (c.batch_kg > 0 && c.batch_every_h) {
+    let t = toHours(c.first_batch_h, start);
+    if (isFinite(t)) {
+      const every = c.batch_every_h, dur = c.batch_duration_h;
+      if (t + dur <= 0) t += Math.ceil((-(t + dur)) / every + 1e-9) * every;
+      for (; t < horizon; t += every) out.push(t);
+    }
+  }
+  return out.filter(s => s < horizon && s + c.batch_duration_h > 0 && (c.batch_duration_h > 0 || s >= 0)).sort((a, b) => a - b);
+}
+
+/* Repeating downtime rules → [start, end] windows (hours from now) up to `untilH`. */
+function expandRules(rules, untilH, start) {
+  const out = [];
+  for (const r of rules) {
+    const every = r.every_days * 24, dur = r.duration_h;
+    let t = toHours(r.first, start);
+    if (!(every > 0 && dur > 0 && isFinite(t))) continue;
+    if (t + dur <= 0) t += Math.ceil(-(t + dur) / every + 1e-9) * every;
+    for (; t < untilH; t += every) out.push([t, t + dur]);
+  }
+  return out;
+}
+
+/* Deliveries the simulation follows: booked ones, then (if the chemical has a regular frequency)
+   predicted ones every N days after the last booking. qty null = fill to the upper cushion. */
+function plannedFor(c, untilH, start) {
+  const booked = state.deliveries
+    .filter(d => d.chemical === c.name)
+    .map(d => ({ t: toHours(d.at, start), qty: d.qty, supplier: d.supplier, kind: "booked", order: null }))
+    .filter(d => d.t > 0 && d.t <= untilH)
+    .sort((a, b) => a.t - b.t);
+  const list = [...booked];
+  if (c.delivery_every_days) {
+    const every = c.delivery_every_days * 24;
+    const supplier = c.supplier || (booked.length ? booked[booked.length - 1].supplier : "");
+    let t;
+    if (booked.length) t = booked[booked.length - 1].t + every;
+    else if (c.next_delivery && isFinite(toHours(c.next_delivery, start))) {
+      t = toHours(c.next_delivery, start);
+      if (t <= 0) t += Math.ceil(-t / every + 1e-9) * every;
+    } else {
+      // nothing to anchor the pattern to: the simulation starts it at the first lower-cushion order
+      list.needsAnchor = true;
+      return list;
+    }
+    for (; t <= untilH; t += every) list.push({ t, qty: c.delivery_kg, supplier, kind: "pred", order: t - c.lead_time_h });
+  }
+  return list;
+}
+
+/* Fixed time-step simulation, same rules as main.py, plus planned deliveries.
+   simH: how far to simulate (can exceed the horizon so the next-6 list fills up).
+   statsH: alarms and lowest level only count up to here (the chart horizon).
+   mode: "plan" follows bookings then predictions, "ideal" delivers just in time (see idealTrigger),
+   "dry" never delivers (used for run-out times). */
+function idealTrigger(c) {
+  // a full delivery fits under the upper cushion from this level; never wait below the lower cushion
+  return c.delivery_kg != null ? Math.max(c.lower_cushion, c.upper_cushion - c.delivery_kg) : c.lower_cushion;
+}
+function simulate(c, simH, stepMin, downs, start, planned, statsH, mode = "plan") {
+  const dt = stepMin / 60, n = Math.max(1, Math.ceil(simH / dt));
+  const cons = new Float64Array(n).fill(c.rate_kg_h * dt);
+  const instant = [];
+  if (c.batch_kg > 0) {
+    for (const s of batchStarts(c, simH, start)) {
+      if (c.batch_duration_h === 0) { instant.push(s); continue; }
+      const e = s + c.batch_duration_h, rate = c.batch_kg / c.batch_duration_h;
+      for (let i = Math.max(0, Math.floor(s / dt)); i < Math.min(Math.ceil(e / dt), n); i++) {
+        const ov = Math.min(e, (i + 1) * dt) - Math.max(s, i * dt);
+        if (ov > 0) cons[i] += rate * ov;
+      }
+    }
+  }
+  for (const [a, b] of downs) {
+    for (let i = Math.max(0, Math.floor(a / dt)); i < Math.min(Math.ceil(b / dt), n); i++) {
+      const down = Math.min(b, (i + 1) * dt) - Math.max(a, i * dt);
+      if (down > 0) cons[i] *= Math.max(0, 1 - down / dt);
+    }
+  }
+  for (const s of instant) if (!downs.some(([a, b]) => a <= s && s < b)) cons[Math.min(Math.floor(s / dt), n - 1)] += c.batch_kg;
+
+  const r = { chem: c, t: [], l: [], fixed: [], topups: [], orders: [], belowLsl: 0, empty: 0, overfills: [], spills: 0, min: c.level_kg, minT: 0, demand: 0, downs };
+  // keep only the corners of the piecewise-linear trace so the charts stay light
+  const push = (t, l, fixed = false) => {
+    const k = r.t.length;
+    if (!fixed && k >= 2 && !r.fixed[k - 1] && r.t[k - 1] > r.t[k - 2]) {
+      const s1 = (r.l[k - 1] - r.l[k - 2]) / (r.t[k - 1] - r.t[k - 2]), s2 = (l - r.l[k - 1]) / (t - r.t[k - 1]);
+      if (Math.abs(s1 - s2) < 1e-9) { r.t[k - 1] = t; r.l[k - 1] = l; return; }
+    }
+    r.t.push(t); r.l.push(l); r.fixed.push(fixed);
+  };
+
+  const booked = planned.filter(p => p.kind === "booked");
+  r.autoFrom = booked.length ? booked[booked.length - 1].t : 0;
+  r.regular = !!c.delivery_every_days;
+  const cushionSupplier = c.supplier || (booked.length ? booked[booked.length - 1].supplier : "");
+  let level = c.level_kg, arrival = null, pi = 0, nextReg = null;
+  const every = (c.delivery_every_days || 0) * 24;
+
+  const deliver = (t, qty, kind, supplier, order) => {
+    const before = level;
+    if (qty == null) qty = Math.max(0, c.upper_cushion - level);
+    let after = before + qty, spill = 0;
+    if (c.capacity != null && after > c.capacity) { spill = after - c.capacity; after = c.capacity; }
+    if (t <= statsH + 1e-9) { if (spill) r.spills++; if (after > c.lsh) r.overfills.push(t); }
+    level = after;
+    r.topups.push({ t, before, after, qty, kind, supplier, order, spill, overLsh: after > c.lsh });
+    push(t, before, true); push(t, after, true);
+  };
+  const trigger = idealTrigger(c);
+  const check = t => {
+    if (mode === "dry") return;
+    if (mode === "ideal") {
+      if (level <= trigger + 1e-9) deliver(t, c.delivery_kg, "ideal", c.supplier, t - c.lead_time_h);
+      return;
+    }
+    while (pi < planned.length && planned[pi].t <= t + 1e-9) {
+      const p = planned[pi++];
+      deliver(t, p.qty, p.kind, p.supplier, p.order);
+    }
+    if (pi < planned.length) return; // still waiting on bookings
+    if (r.regular && !planned.needsAnchor) return; // regular pattern fully planned
+    if (nextReg !== null) { // regular pattern anchored on the first cushion delivery
+      if (t >= nextReg - 1e-9) { deliver(t, c.delivery_kg, "pred", cushionSupplier, nextReg - c.lead_time_h); nextReg += every; }
+      return;
+    }
+    if (arrival === null && level <= c.lower_cushion) { arrival = t + c.lead_time_h; r.orders.push(t); }
+    if (arrival !== null && t >= arrival - 1e-9) {
+      deliver(t, c.delivery_kg, "pred", cushionSupplier, r.orders[r.orders.length - 1]);
+      arrival = null;
+      if (r.regular) nextReg = t + every;
+    }
+  };
+  push(0, level, true);
+  check(0);
+  for (let i = 0; i < n; i++) {
+    const t1 = Math.min((i + 1) * dt, simH), step = t1 - i * dt, d = cons[i];
+    const inStats = t1 <= statsH + 1e-9;
+    if (d > level) { if (inStats) r.empty += step * (1 - level / d); level = 0; } else level -= d;
+    if (inStats) {
+      if (level < c.lsl) r.belowLsl += step;
+      if (level < r.min) { r.min = level; r.minT = t1; }
+      r.demand += d;
+    }
+    push(t1, level);
+    check(t1);
+  }
+  r.pending = arrival; // cushion order placed but not delivered within the simulated time
+  return r;
+}
+
+/* ======================================================================
+   State, persistence
+   ====================================================================== */
+let state;
+try { const s = localStorage.getItem(STORE_KEY); state = s ? loadState(JSON.parse(s)) : exampleState(); }
+catch { state = exampleState(); }
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {} };
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const kg = v => Math.round(v).toLocaleString();
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+let START = nowMinute();
+const fmtT = h => dayFmt.format(addH(START, h));
+/* 0.4 → "24 min", 5.5 → "5.5 h", 76 → "3 d 4 h" */
+function fmtDur(h) {
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if (h < 24) return `${+h.toFixed(1)} h`;
+  const d = Math.floor(h / 24), rest = Math.round(h - d * 24);
+  return rest === 24 ? `${d + 1} d` : rest ? `${d} d ${rest} h` : `${d} d`;
+}
+/* "in 3 d 4 h" with a class for colouring, from a threshold time (hours from now, null = never). */
+function untilCell(t, simH, warnH) {
+  if (t == null) return { text: `Over ${Math.round(simH / 24)} d`, cls: "ok" };
+  if (t <= 0) return { text: "Now", cls: "crit" };
+  return { text: fmtDur(t), cls: t <= warnH ? "crit" : t <= warnH * 2 ? "warn" : "" };
+}
+
+function toast(msg) {
+  const el = $("toast"); el.textContent = msg; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 2200);
+}
+
+function describeUse(c) {
+  const p = [];
+  if (c.rate_kg_h > 0) p.push(`${c.rate_kg_h} kg/h`);
+  if (c.batch_kg > 0 && (c.batch_every_h || c.batch_times_h.length)) {
+    let b = `${c.batch_kg} kg batch`;
+    if (c.batch_every_h) b += ` every ${c.batch_every_h} h`;
+    if (c.batch_duration_h > 0) b += ` over ${c.batch_duration_h} h`;
+    p.push(b);
+  }
+  return p.join(" + ") || "No consumption";
+}
+
+function statusOf(r) {
+  if (r.empty > 0) return { cls: "crit", text: `Runs empty ${r.empty.toFixed(1)} h` };
+  if (r.spills) return { cls: "crit", text: `Delivery won't fit ×${r.spills}` };
+  if (r.belowLsl > 0) return { cls: "crit", text: `Below LSL ${r.belowLsl.toFixed(1)} h` };
+  if (r.overfills.length) return { cls: "warn", text: `Overfills LSH ×${r.overfills.length}` };
+  return { cls: "ok", text: "OK" };
+}
+
+/* ======================================================================
+   Rendering
+   ====================================================================== */
+let results = [];
+
+/* Ideal-schedule overlay: a per-viewer preference, shared by both pages. */
+let showIdeal = (() => { try { return localStorage.getItem(STORE_KEY + ":ideal") === "1"; } catch { return false; } })();
+function setIdeal(on) {
+  showIdeal = on;
+  try { localStorage.setItem(STORE_KEY + ":ideal", on ? "1" : "0"); } catch {}
+  document.querySelectorAll(".ideal-toggle").forEach(cb => (cb.checked = on));
+  document.querySelectorAll("[data-ideal-only]").forEach(el => (el.hidden = !on));
+  renderCards(); renderSchedule();
+}
+
+function recompute() {
+  START = nowMinute();
+  $("asof").textContent = `Forecast from ${dayFmt.format(START)} · ${state.horizon_h / 24} days`;
+  const H = state.horizon_h;
+  const oneOff = state.downtimes.map(([a, b]) => [toHours(a, START), toHours(b, START)]).filter(([a, b]) => b > a);
+  results = state.chemicals.map(c => {
+    const err = validate(c);
+    if (err) return { chem: c, err };
+    const own = c.downtimes.map(([a, b]) => [toHours(a, START), toHours(b, START)]).filter(([a, b]) => b > a);
+    const downsTo = simH => [...oneOff, ...own, ...expandRules(state.downtime_rules, simH, START)].sort((x, y) => x[0] - y[0]);
+    // simulate the horizon; keep going (doubling, up to a year) until `enough` says the run has what we need
+    const run = (mode, enough) => {
+      let simH = H, r;
+      for (;;) {
+        r = simulate(c, simH, state.step_min, downsTo(simH), START, mode === "plan" ? plannedFor(c, simH, START) : [], H, mode);
+        if (enough(r) || simH >= MAX_SIM_H) break;
+        simH = Math.min(simH * 2, MAX_SIM_H);
+      }
+      r.simH = simH;
+      return r;
+    };
+    const r = run("plan", x => x.topups.length >= NEXT_N);
+    r.inHorizon = r.topups.filter(p => p.t <= H + 1e-9);
+    r.next = r.topups.slice(0, NEXT_N);
+    r.ideal = run("ideal", x => x.topups.length >= NEXT_N);
+    r.ideal.inHorizon = r.ideal.topups.filter(p => p.t <= H + 1e-9);
+    // nothing else delivered: when does it hit each threshold?
+    const dry = run("dry", x => x.l[x.l.length - 1] <= 0 || (c.rate_kg_h === 0 && c.batch_kg === 0));
+    r.dry = { simH: dry.simH, cushion: crossing(dry, c.lower_cushion), lsl: crossing(dry, c.lsl, true), empty: crossing(dry, 0) };
+    // on the schedule (plan) within the horizon
+    r.firstBelowLsl = crossing(r, c.lsl, true, H);
+    r.firstEmpty = crossing(r, 0, false, H);
+    return r;
+  });
+}
+/* First time the trace falls to `y` (below it when strict), interpolated between corners. null = never. */
+function crossing(r, y, strict = false, untilH = Infinity) {
+  const hit = v => (strict ? v < y - 1e-9 : v <= y + 1e-9);
+  for (let i = 0; i < r.t.length && r.t[i] <= untilH + 1e-9; i++) {
+    if (!hit(r.l[i])) continue;
+    if (i === 0 || r.t[i] === r.t[i - 1] || r.l[i - 1] === r.l[i]) return r.t[i];
+    const f = (r.l[i - 1] - y) / (r.l[i - 1] - r.l[i]);
+    return r.t[i - 1] + Math.max(0, Math.min(1, f)) * (r.t[i] - r.t[i - 1]);
+  }
+  return null;
+}
+const NEXT_N = 6, MAX_SIM_H = 24 * 365;
+
+function describeDelivery(c) {
+  const size = c.delivery_kg != null ? `${kg(c.delivery_kg)} kg` : "fill to upper cushion";
+  return c.delivery_every_days
+    ? `Regular: ${size} every ${c.delivery_every_days} day${c.delivery_every_days === 1 ? "" : "s"}`
+    : `Order at lower cushion: ${size}`;
+}
+
+function gaugeHTML(c) {
+  const scale = c.capacity ?? c.lsh * 1.1, pct = v => `${Math.max(0, Math.min(100, (v / scale) * 100))}%`;
+  return `<div class="gauge" title="${kg(c.level_kg)} of ${kg(scale)} kg">
+    <div class="band" style="left:${pct(c.lower_cushion)};width:calc(${pct(c.upper_cushion)} - ${pct(c.lower_cushion)})"></div>
+    <div class="fill${c.level_kg < c.lsl ? " low" : ""}" style="width:${pct(c.level_kg)}"></div>
+    <div class="tick alarm" style="left:${pct(c.lsl)}"></div><div class="tick cush" style="left:${pct(c.lower_cushion)}"></div>
+    <div class="tick cush" style="left:${pct(c.upper_cushion)}"></div><div class="tick alarm" style="left:calc(${pct(c.lsh)} - 2px)"></div>
+  </div>`;
+}
+
+function renderSummary() {
+  $("summary").innerHTML = results.map((r, i) => {
+    const c = r.chem;
+    if (r.err) return `<tr class="link" data-i="${i}"><td class="chem-name">${esc(c.name)}</td><td colspan="8" class="err">${esc(r.err)}</td></tr>`;
+    const st = statusOf(r);
+    const nx = r.topups[0];
+    const firstOrder = r.topups.find(p => p.order != null)?.order;
+    const order = firstOrder == null ? "—" : firstOrder <= 0 ? "Now" : fmtT(firstOrder);
+    const deliv = nx ? `${fmtT(nx.t)} <span class="kind ${nx.kind}">${nx.kind === "booked" ? "Booked" : "Predicted"}</span>`
+      : r.pending != null ? `${fmtT(r.pending)} (after horizon)` : "—";
+    const out = untilCell(r.dry.empty, r.dry.simH, Math.max(24, c.lead_time_h));
+    return `<tr class="link" data-i="${i}">
+      <td class="chem-name">${esc(c.name)}</td><td class="r num">${kg(c.level_kg)}</td><td>${gaugeHTML(c)}</td>
+      <td class="r num"><span class="v ${out.cls}" title="If nothing else is delivered">${out.text}</span></td>
+      <td>${esc(describeUse(c))}</td><td class="num">${order}</td><td class="num">${deliv}</td>
+      <td class="r num">${kg(r.min)}</td><td><span class="status ${st.cls}">${st.text}</span></td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="muted">No chemicals yet. Use Add chemical to set up your first tank.</td></tr>`;
+}
+
+const KIND_LABEL = { booked: "Booked", pred: "Predicted", ideal: "Ideal" };
+let schedFilter = "";
+function renderSchedule() {
+  const sel = $("sched-filter"), names = results.map(r => r.chem.name);
+  if (schedFilter && !names.includes(schedFilter)) schedFilter = "";
+  sel.innerHTML = `<option value="">All chemicals</option>` + names.map(n => `<option>${esc(n)}</option>`).join("");
+  sel.value = schedFilter;
+
+  const shown = results.filter(r => !r.err && (!schedFilter || r.chem.name === schedFilter));
+  const rows = [];
+  shown.forEach(r => {
+    const ideal = r.ideal.topups;
+    r.inHorizon.forEach(tp => {
+      // nearest ideal delivery of the same chemical, to say how early or late this one is
+      let near = null;
+      for (const q of ideal) if (!near || Math.abs(q.t - tp.t) < Math.abs(near.t - tp.t)) near = q;
+      rows.push({ name: r.chem.name, ...tp, vsIdeal: near ? tp.t - near.t : null });
+    });
+    if (showIdeal) r.ideal.inHorizon.forEach(tp => rows.push({ name: r.chem.name, ...tp }));
+  });
+  rows.sort((a, b) => a.t - b.t || (a.kind === "ideal") - (b.kind === "ideal"));
+  const cols = showIdeal ? 10 : 9;
+  $("schedule").innerHTML = rows.map(x => {
+    const check = x.spill > 0 ? `<span class="flag">${kg(x.spill)} kg won't fit</span>`
+      : x.overLsh ? `<span class="flag warn">Above LSH</span>` : `<span class="muted">OK</span>`;
+    let vs = "";
+    if (showIdeal) {
+      if (x.kind === "ideal") vs = `<td class="muted">—</td>`;
+      else if (x.vsIdeal == null) vs = `<td class="muted">No ideal delivery</td>`;
+      else if (Math.abs(x.vsIdeal) < 1) vs = `<td><span class="v ok">On time</span></td>`;
+      else vs = `<td><span class="v ${x.vsIdeal > 0 ? "crit" : "warn"}">${fmtDur(Math.abs(x.vsIdeal))} ${x.vsIdeal > 0 ? "late" : "early"}</span></td>`;
+    }
+    const order = x.order == null ? "—" : x.order <= 0 ? `<span class="flag">Overdue</span>` : fmtT(x.order);
+    return `<tr${x.kind === "ideal" ? ` class="ideal-row"` : ""}><td class="chem-name">${esc(x.name)}</td>
+    <td><span class="kind ${x.kind}">${KIND_LABEL[x.kind]}</span></td>
+    <td>${esc(x.supplier || "—")}</td>
+    <td class="num">${order}</td><td class="num">${fmtT(x.t)}</td>
+    <td class="r num">${kg(x.before)}</td><td class="r num">${kg(x.qty)}</td><td class="r num">${kg(x.after)}</td><td>${check}</td>${vs}</tr>`;
+  }).join("") || `<tr><td colspan="${cols}" class="muted">No deliveries within the horizon.</td></tr>`;
+  renderSchedule.rows = rows;
+  if (page === "deliveries") renderTimeline(shown);
+}
+
+/* One row per chemical: actual deliveries on the line, ideal ones just below it. */
+function renderTimeline(shown) {
+  const div = $("timeline");
+  if (!window.Plotly) { div.innerHTML = `<p class="err">The charting library didn't load. Check your connection and reload the page.</p>`; return; }
+  const T = { ink: tok("--ink"), ink2: tok("--ink-2"), muted: tok("--muted"), line: tok("--line"), surface: tok("--surface"),
+    accent: tok("--accent"), ideal: tok("--ideal"), crit: tok("--crit") };
+  const X = h => addH(START, h), H = state.horizon_h, n = shown.length;
+  const y = i => n - 1 - i; // first chemical at the top
+  const traces = [];
+  const series = (pick, yOff, marker, label) => {
+    const pts = [];
+    shown.forEach((r, i) => pick(r).forEach(p => pts.push({ r, i, p })));
+    if (!pts.length) return;
+    traces.push({
+      x: pts.map(o => X(o.p.t)), y: pts.map(o => y(o.i) + yOff), mode: "markers", name: label, marker,
+      customdata: pts.map(o => [o.r.chem.name, o.p.qty, o.p.before, o.p.after]),
+      hovertemplate: `<b>%{customdata[0]}</b><br>${label} %{x|%a %d %b %H:%M}<br>+%{customdata[1]:,.0f} kg · %{customdata[2]:,.0f} → %{customdata[3]:,.0f} kg<extra></extra>`,
+    });
+  };
+  series(r => r.inHorizon.filter(p => p.kind === "booked"), 0,
+    { symbol: "triangle-up", size: 13, color: T.accent, line: { color: T.surface, width: 1.5 } }, "Booked delivery");
+  series(r => r.inHorizon.filter(p => p.kind === "pred"), 0,
+    { symbol: "triangle-up-open", size: 13, color: T.accent, line: { width: 2 } }, "Predicted delivery");
+  if (showIdeal) series(r => r.ideal.inHorizon, -0.3,
+    { symbol: "diamond-open", size: 11, color: T.ideal, line: { width: 2 } }, "Ideal delivery");
+  // where the schedule first drops below LSL
+  const alarms = shown.filter(r => r.firstBelowLsl != null);
+  if (alarms.length) traces.push({
+    x: alarms.map(r => X(r.firstBelowLsl)), y: alarms.map(r => y(shown.indexOf(r)) + 0.3), mode: "markers", name: "Below LSL",
+    marker: { symbol: "x-thin-open", size: 10, color: T.crit, line: { width: 2.5, color: T.crit } },
+    customdata: alarms.map(r => r.chem.name), hovertemplate: "<b>%{customdata}</b><br>Below LSL from %{x|%a %d %b %H:%M}<extra></extra>",
+  });
+  const plantDowns = [...state.downtimes.map(([a, b]) => [toHours(a, START), toHours(b, START)]), ...expandRules(state.downtime_rules, H, START)]
+    .filter(([a, b]) => b > 0 && a < H && b > a);
+  const shapes = [
+    ...shown.map((_, i) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y(i), y1: y(i), line: { color: T.line, width: 1 }, layer: "below" })),
+    ...plantDowns.map(([a, b]) => ({ type: "rect", xref: "x", yref: "paper", x0: X(Math.max(a, 0)), x1: X(Math.min(b, H)), y0: 0, y1: 1,
+      fillcolor: alpha(T.muted, b - a < 4 ? 0.3 : 0.16), line: { width: 0 }, layer: "below" })),
+  ];
+  const narrow = div.clientWidth < 520;
+  div.style.height = `${Math.max(180, 70 + n * 58)}px`;
+  Plotly.react(div, traces, {
+    margin: { l: narrow ? 96 : 150, r: 16, t: 10, b: 36 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    showlegend: false, hovermode: "closest", dragmode: "zoom",
+    font: { family: "Barlow, sans-serif", color: T.muted, size: 12 },
+    hoverlabel: { bgcolor: T.surface, bordercolor: T.line, font: { color: T.ink, family: "Barlow, sans-serif" } },
+    xaxis: { type: "date", range: [START, X(H)], gridcolor: T.line, zeroline: false, linecolor: T.line, tickformat: "%a %d %b" },
+    yaxis: { range: [-0.7, n - 0.4], tickvals: shown.map((_, i) => y(i)), ticktext: shown.map(r => r.chem.name), showgrid: false, zeroline: false, fixedrange: true,
+      tickfont: { color: T.ink2, size: narrow ? 11 : 13, family: "Barlow Semi Condensed, sans-serif" } },
+    shapes,
+  }, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian", "zoomIn2d", "zoomOut2d"] });
+}
+
+/* ---------- charts ---------- */
+const tok = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function alpha(hex, a) {
+  const h = hex.replace("#", ""), v = parseInt(h.length === 3 ? h.split("").map(x => x + x).join("") : h, 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
+}
+function belowSeries(ts, ls, lsl) {
+  const x = [], y = [];
+  for (let i = 0; i < ts.length; i++) {
+    if (i > 0 && (ls[i - 1] - lsl) * (ls[i] - lsl) < 0 && ts[i] > ts[i - 1]) {
+      const f = (lsl - ls[i - 1]) / (ls[i] - ls[i - 1]);
+      x.push(ts[i - 1] + f * (ts[i] - ts[i - 1])); y.push(lsl);
+    }
+    x.push(ts[i]); y.push(Math.min(ls[i], lsl));
+  }
+  return { x, y };
+}
+
+function chartFor(div, r) {
+  const c = r.chem, T = {
+    ink: tok("--ink"), ink2: tok("--ink-2"), muted: tok("--muted"), line: tok("--line"), surface: tok("--surface"),
+    accent: tok("--accent"), crit: tok("--crit"), warn: tok("--warn"), ideal: tok("--ideal"),
+  };
+  const X = h => addH(START, h);
+  const traces = [];
+  if (r.belowLsl > 0) {
+    const b = belowSeries(r.t, r.l, c.lsl);
+    traces.push({ x: b.x.map(X), y: b.x.map(() => c.lsl), mode: "lines", line: { width: 0 }, hoverinfo: "skip" });
+    traces.push({ x: b.x.map(X), y: b.y, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: alpha(T.crit, 0.28), hoverinfo: "skip" });
+  }
+  traces.push({
+    x: r.t.map(X), y: r.l, mode: "lines", name: "Level", line: { color: T.accent, width: 2.2 },
+    fill: "tozeroy", fillcolor: alpha(T.accent, 0.1), hovertemplate: "%{x|%a %d %b %H:%M}<br><b>%{y:,.0f} kg</b><extra></extra>",
+  });
+  if (showIdeal) {
+    const id = r.ideal;
+    traces.push({
+      x: id.t.map(X), y: id.l, mode: "lines", name: "Ideal", line: { color: T.ideal, width: 1.8, dash: "dash" },
+      hovertemplate: "Ideal %{x|%a %d %b %H:%M}<br><b>%{y:,.0f} kg</b><extra></extra>",
+    });
+    if (id.topups.length) traces.push({
+      x: id.topups.map(p => X(p.t)), y: id.topups.map(p => p.after), mode: "markers", name: "Ideal delivery",
+      marker: { symbol: "diamond-open", size: 11, color: T.ideal, line: { width: 2 } },
+      customdata: id.topups.map(p => [p.qty, p.before, p.order <= 0 ? "now (overdue)" : fmtT(p.order)]),
+      hovertemplate: "Ideal delivery %{x|%a %d %b %H:%M}<br>+%{customdata[0]:,.0f} kg at %{customdata[1]:,.0f} → %{y:,.0f} kg<br>order by %{customdata[2]}<extra></extra>",
+    });
+  }
+  for (const kind of ["booked", "pred"]) {
+    const ps = r.topups.filter(p => p.kind === kind);
+    if (!ps.length) continue;
+    traces.push({
+      x: ps.map(p => X(p.t)), y: ps.map(p => p.after), mode: "markers", name: kind,
+      marker: kind === "booked"
+        ? { symbol: "triangle-up", size: 12, color: T.accent, line: { color: T.surface, width: 1.5 } }
+        : { symbol: "triangle-up-open", size: 12, color: T.accent, line: { width: 2 } },
+      customdata: ps.map(p => [p.qty, p.supplier || "no supplier set", p.spill > 0 ? `<br><b>${kg(p.spill)} kg won't fit</b>` : ""]),
+      hovertemplate: `${kind === "booked" ? "Booked" : "Predicted"} delivery %{x|%a %d %b %H:%M}<br>+%{customdata[0]:,.0f} kg → %{y:,.0f} kg<br>%{customdata[1]}%{customdata[2]}<extra></extra>`,
+    });
+  }
+  if (r.orders.length && c.lead_time_h > 0) traces.push({
+    x: r.orders.map(X), y: r.orders.map(() => c.lower_cushion), mode: "markers", name: "Order",
+    marker: { symbol: "circle-open", size: 10, color: T.accent, line: { width: 2 } },
+    hovertemplate: `Order placed %{x|%a %d %b %H:%M}<br>arrives in ${c.lead_time_h} h<extra></extra>`,
+  });
+
+  const lines = [
+    [c.lsh, "LSH", T.crit, "dash"], [c.upper_cushion, "Upper cushion", T.warn, "dot"],
+    [c.lower_cushion, "Lower cushion", T.warn, "dot"], [c.lsl, "LSL", T.crit, "dash"],
+  ];
+  const shapes = [
+    { type: "rect", xref: "paper", x0: 0, x1: 1, yref: "y", y0: c.lower_cushion, y1: c.upper_cushion, fillcolor: alpha(T.accent, 0.05), line: { width: 0 }, layer: "below" },
+    ...r.downs.filter(([a, b]) => b > 0 && a < state.horizon_h).map(([a, b]) => ({
+      type: "rect", xref: "x", yref: "paper", x0: X(Math.max(a, 0)), x1: X(Math.min(b, state.horizon_h)), y0: 0, y1: 1,
+      fillcolor: alpha(T.muted, b - a < 4 ? 0.3 : 0.16), line: { width: 0 }, layer: "below",
+    })),
+    // short stops are too thin to see as bands at this scale: mark them with a line
+    ...r.downs.filter(([a, b]) => b > 0 && a < state.horizon_h && b - a < 4).map(([a, b]) => ({
+      type: "line", xref: "x", yref: "paper", x0: X((a + b) / 2), x1: X((a + b) / 2), y0: 0, y1: 1,
+      line: { color: alpha(T.muted, 0.55), width: 1.5, dash: "dot" }, layer: "below",
+    })),
+    ...lines.map(([y, , col, dash]) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y, line: { color: col, width: 1.3, dash } })),
+    ...(r.autoFrom > 0 ? [{ type: "line", xref: "x", x0: X(r.autoFrom), x1: X(r.autoFrom), yref: "paper", y0: 0, y1: 1, line: { color: T.ink2, width: 1, dash: "dot" } }] : []),
+  ];
+  const annotations = [
+    ...lines.map(([y, label]) => ({ xref: "paper", x: 1, xanchor: "left", xshift: 8, y, yref: "y", showarrow: false,
+      text: `${label} <b>${kg(y)}</b>`, font: { size: 11, color: T.ink2, family: "Barlow, sans-serif" } })),
+    ...r.downs.filter(([a, b]) => b > 0 && a < state.horizon_h && b - a >= 4).map(([a, b]) => ({
+      xref: "x", x: X((Math.max(a, 0) + Math.min(b, state.horizon_h)) / 2), yref: "paper", y: 1, yanchor: "bottom", showarrow: false,
+      text: "Downtime", font: { size: 10, color: T.muted, family: "Barlow, sans-serif" } })),
+    ...(r.autoFrom > 0 ? [{ xref: "x", x: X(r.autoFrom), xanchor: "left", xshift: 4, yref: "paper", y: 0.98, yanchor: "top", showarrow: false,
+      text: "Predicted from here →", font: { size: 11, color: T.ink2, family: "Barlow, sans-serif" } }] : []),
+  ];
+  const top = Math.max(c.capacity ?? c.lsh * 1.1, ...r.l.filter((_, i) => r.t[i] <= state.horizon_h)) * 1.04;
+  const narrow = div.clientWidth < 520;
+  const layout = {
+    margin: { l: 52, r: narrow ? 92 : 128, t: 18, b: 40 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    showlegend: false, hovermode: "closest", dragmode: "zoom",
+    font: { family: "Barlow, sans-serif", color: T.muted, size: 12 },
+    hoverlabel: { bgcolor: T.surface, bordercolor: T.line, font: { color: T.ink, family: "Barlow, sans-serif" } },
+    xaxis: { type: "date", range: [START, X(state.horizon_h)], showgrid: true, gridcolor: T.line, gridwidth: 1, zeroline: false,
+      linecolor: T.line, tickformat: "%a %d %b", hoverformat: "%a %d %b %H:%M", showspikes: true, spikemode: "across", spikecolor: T.muted, spikethickness: 1, spikedash: "dot" },
+    yaxis: { range: [0, top], gridcolor: T.line, zeroline: false, tickformat: ",.0f", ticksuffix: " ", fixedrange: true },
+    shapes, annotations,
+  };
+  return Plotly.react(div, traces, layout, {
+    displaylogo: false, responsive: true,
+    modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian", "zoomIn2d", "zoomOut2d"],
+  });
+}
+
+let activeTab = (() => { try { return localStorage.getItem(STORE_KEY + ":tab") || ""; } catch { return ""; } })();
+function selectTab(name, focus = false) {
+  activeTab = name;
+  try { localStorage.setItem(STORE_KEY + ":tab", name); } catch {}
+  renderCards();
+  if (focus) document.querySelector(`#tabs [aria-selected="true"]`)?.focus();
+}
+
+/* Key metrics under each chart. "No more deliveries" rows ignore every booking and prediction. */
+function metricsTable(r) {
+  const c = r.chem, H = state.horizon_h, days = H / 24, lead = c.lead_time_h;
+  const warnH = Math.max(24, lead);
+  const when = t => (t == null ? `Not within ${Math.round(r.dry.simH / 24)} days` : t <= 0 ? "Already there" : fmtT(t));
+  const rows = [];
+  const add = (label, v, cls, detail) => rows.push(`<tr><td>${label}</td><td class="v ${cls || ""}">${v}</td><td class="d">${detail}</td></tr>`);
+
+  const e = untilCell(r.dry.empty, r.dry.simH, warnH);
+  add("Runs out in", e.text, e.cls, `Empty ${when(r.dry.empty)} if nothing else arrives`);
+  const l = untilCell(r.dry.lsl, r.dry.simH, warnH);
+  add("Reaches LSL in", l.text, l.cls, `Below ${kg(c.lsl)} kg ${when(r.dry.lsl)} if nothing else arrives`);
+  const cu = untilCell(r.dry.cushion, r.dry.simH, warnH);
+  add("Reaches lower cushion in", cu.text, cu.cls === "ok" ? "" : cu.cls, `${kg(c.lower_cushion)} kg ${when(r.dry.cushion)}`);
+  if (r.dry.lsl != null) {
+    const by = r.dry.lsl - lead;
+    add("Order by", by <= 0 ? "Overdue" : fmtT(by), by <= 0 ? "crit" : by <= 24 ? "warn" : "",
+      `Latest order that still arrives before LSL${lead ? ` (${lead} h lead time)` : ""}`);
+  }
+
+  const st = statusOf(r);
+  const onSched = r.firstEmpty != null ? `Runs empty ${fmtT(r.firstEmpty)}`
+    : r.firstBelowLsl != null ? `Below LSL ${fmtT(r.firstBelowLsl)}` : `Stays above LSL for ${days} days`;
+  add("On your schedule", onSched, st.cls === "ok" ? "ok" : st.cls, st.cls === "ok" ? "Booked deliveries, then predicted ones" : st.text);
+  add("Lowest level", `${kg(r.min)} kg`, r.min < c.lsl ? "crit" : r.min < c.lower_cushion ? "warn" : "",
+    `${r.minT > 0 ? fmtT(r.minT) : "Now"} · ${Math.round((r.min / (c.capacity ?? c.lsh)) * 100)}% of ${c.capacity != null ? "capacity" : "LSH"}`);
+
+  const nx = r.topups[0];
+  if (nx) add("Next delivery", nx.t <= 0 ? "Now" : `in ${fmtDur(nx.t)}`, "",
+    `${fmtT(nx.t)} · ${kg(nx.qty)} kg ${nx.kind === "booked" ? "booked" : "predicted"} · arrives at ${kg(nx.before)} kg, leaves ${kg(nx.after)} kg`);
+  else add("Next delivery", "None", "", `Nothing needed in the next ${Math.round(r.simH / 24)} days`);
+
+  const perDay = r.demand / days;
+  add("Average use", `${kg(perDay)} kg/day`, "", `${kg(r.demand)} kg over ${days} days, downtimes included`);
+  add("Room in tank", `${kg(Math.max(0, c.lsh - c.level_kg))} kg`, c.level_kg > c.lsh ? "crit" : "",
+    `Space before LSH now${c.capacity != null ? ` · ${kg(Math.max(0, c.capacity - c.level_kg))} kg to full` : ""}`);
+
+  const bk = r.inHorizon.filter(p => p.kind === "booked"), pr = r.inHorizon.filter(p => p.kind === "pred");
+  const delivered = r.inHorizon.reduce((s, p) => s + p.qty, 0);
+  add("Deliveries in horizon", `${r.inHorizon.length}`, "", `${bk.length} booked, ${pr.length} predicted · ${kg(delivered)} kg in, ${kg(r.demand)} kg used`);
+
+  const id = r.ideal, idn = id.inHorizon.length, diff = r.inHorizon.length - idn;
+  const nxi = id.topups[0];
+  add("Ideal schedule", `${idn} deliver${idn === 1 ? "y" : "ies"}`, diff > 0 ? "warn" : "",
+    `${diff === 0 ? "Same count as your schedule" : diff > 0 ? `${diff} fewer than your schedule` : `${-diff} more than your schedule`}`
+    + (nxi ? ` · next ${nxi.t <= 0 ? "now" : fmtT(nxi.t)}, ${kg(nxi.qty)} kg at ${kg(idealTrigger(c))} kg` : ""));
+
+  return `<div class="next">
+    <div class="next-head"><h4>Key metrics</h4><span class="hint">${esc(describeDelivery(c))}${lead ? ` · ${lead} h lead time` : ""}</span></div>
+    <div class="table-scroll"><table class="metrics">
+      <thead><tr><th>Metric</th><th>Value</th><th>Detail</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function renderCards() {
+  const tabs = $("tabs"), panel = $("tabpanel");
+  if (!results.length) {
+    tabs.innerHTML = ""; panel.innerHTML = `<p class="muted">No chemicals yet. Use Add chemical to set up your first tank.</p>`;
+    return;
+  }
+  if (!results.some(r => r.chem.name === activeTab)) activeTab = results[0].chem.name;
+  tabs.innerHTML = results.map((r, i) => {
+    const st = r.err ? { cls: "crit" } : statusOf(r), sel = r.chem.name === activeTab;
+    return `<button type="button" role="tab" id="tab-${i}" class="tab" aria-selected="${sel}" aria-controls="tabpanel" tabindex="${sel ? 0 : -1}" data-tab="${esc(r.chem.name)}">
+      <i class="dot ${st.cls}" aria-hidden="true"></i>${esc(r.chem.name)}</button>`;
+  }).join("");
+  const i = results.findIndex(r => r.chem.name === activeTab), r = results[i], c = r.chem;
+  panel.setAttribute("aria-labelledby", `tab-${i}`);
+  const old = panel.querySelector(".chart"); if (old && window.Plotly) Plotly.purge(old);
+  const meta = r.err ? "" : [
+    describeUse(c), `now ${kg(c.level_kg)} kg`, describeDelivery(c),
+    `${r.inHorizon.filter(p => p.kind === "booked").length} booked, ${r.inHorizon.filter(p => p.kind === "pred").length} predicted in ${state.horizon_h / 24} days`,
+    ...(c.supplier ? [`supplier ${c.supplier}`] : []),
+  ].map(s => `<span>${esc(s)}</span>`).join("");
+  const st = r.err ? null : statusOf(r);
+  panel.innerHTML = `<article class="card">
+      <div class="card-head">
+        <div><h3>${esc(c.name)}</h3><div class="meta">${meta}</div></div>
+        <div class="actions">${st ? `<span class="status ${st.cls}">${st.text}</span>` : ""}
+          <button type="button" class="ghost" data-edit="${i}">Edit</button></div>
+      </div>
+      ${r.err ? `<p class="err">${esc(r.err)} Edit this chemical to fix it.</p>`
+        : `<div class="chart" id="chart"></div>${metricsTable(r)}`}
+    </article>`;
+  if (r.err) return;
+  if (!window.Plotly) {
+    $("chart").outerHTML = `<p class="err">The charting library didn't load. Check your connection and reload the page.</p>`;
+    return;
+  }
+  chartFor($("chart"), r);
+}
+
+/* ---------- downtime rows (shared by plant panel and chemical editor) ---------- */
+function hoursBetween(a, b) { const h = (new Date(b) - new Date(a)) / 3.6e6; return isFinite(h) ? h : NaN; }
+function dtRows(host, list, onChange, prefix) {
+  host.innerHTML = list.map(([a, b], i) => {
+    const h = hoursBetween(a, b);
+    return `<div class="dt-row">
+      <input type="datetime-local" id="${prefix}-a-${i}" value="${esc(a)}" aria-label="Downtime ${i + 1} start">
+      <span class="muted">to</span>
+      <input type="datetime-local" id="${prefix}-b-${i}" value="${esc(b)}" aria-label="Downtime ${i + 1} end">
+      <span class="dur num">${isFinite(h) ? (h > 0 ? `${+h.toFixed(1)} h` : "end before start") : ""}</span>
+      <button type="button" class="ghost" data-rm="${i}" aria-label="Remove downtime ${i + 1}">Remove</button>
+    </div>`;
+  }).join("") || `<span class="hint">None.</span>`;
+  host.querySelectorAll("input").forEach(inp => inp.addEventListener("change", () => {
+    const [, ab, i] = inp.id.slice(prefix.length).split("-");
+    list[+i][ab === "a" ? 0 : 1] = inp.value;
+    onChange();
+  }));
+  host.querySelectorAll("[data-rm]").forEach(btn => btn.addEventListener("click", () => { list.splice(+btn.dataset.rm, 1); onChange(); }));
+}
+function renderPlantDowntimes() {
+  dtRows($("plant-dt"), state.downtimes, () => { renderPlantDowntimes(); update(); }, "pdt");
+  const host = $("plant-rules");
+  host.innerHTML = state.downtime_rules.map((r, i) => `<div class="dt-row rule">
+      <label class="inline">Every <input type="number" id="rule-every-${i}" value="${r.every_days}" min="0.1" step="any" aria-label="Repeat every (days)"> days</label>
+      <label class="inline">for <input type="number" id="rule-dur-${i}" value="${r.duration_h}" min="0.1" step="any" aria-label="Duration (hours)"> h</label>
+      <label class="inline">next starts <input type="datetime-local" id="rule-first-${i}" value="${esc(r.first)}" aria-label="Next start"></label>
+      <button type="button" class="ghost" data-rmrule="${i}" aria-label="Remove repeating downtime ${i + 1}">Remove</button>
+    </div>`).join("") || `<span class="hint">None.</span>`;
+  host.querySelectorAll("input").forEach(inp => inp.addEventListener("change", () => {
+    const [, key, i] = inp.id.split("-"), rule = state.downtime_rules[+i];
+    if (key === "first") rule.first = inp.value;
+    else if (+inp.value > 0) rule[key === "every" ? "every_days" : "duration_h"] = +inp.value;
+    renderPlantDowntimes(); update();
+  }));
+  host.querySelectorAll("[data-rmrule]").forEach(b => b.addEventListener("click", () => {
+    state.downtime_rules.splice(+b.dataset.rmrule, 1); renderPlantDowntimes(); update();
+  }));
+}
+
+function update() { recompute(); renderSummary(); renderCards(); renderSchedule(); renderBooked(); renderImportLine(); save(); }
+
+/* ======================================================================
+   Chemical editor
+   ====================================================================== */
+const NUM_FIELDS = ["level_kg", "capacity", "lsl", "lower_cushion", "upper_cushion", "lsh", "lead_time_h", "delivery_kg", "delivery_every_days", "rate_kg_h", "batch_kg", "batch_every_h", "batch_duration_h"];
+let editing = null, editDowntimes = [];
+
+function openEditor(i) {
+  editing = i;
+  const c = i == null
+    ? normChem({ name: "", level_kg: 500, rate_kg_h: 1, lsl: 50, lower_cushion: 150, upper_cushion: 800, lsh: 900, capacity: 1000, first_batch_h: fmtLocal(nowMinute()) })
+    : state.chemicals[i];
+  $("chem-title").textContent = i == null ? "Add chemical" : `Edit ${c.name}`;
+  $("f-name").value = c.name;
+  $("f-supplier").value = c.supplier;
+  $("f-next_delivery").value = c.next_delivery || "";
+  for (const f of NUM_FIELDS) $(`f-${f}`).value = c[f] == null ? "" : c[f];
+  $("f-first_batch").value = typeof c.first_batch_h === "string" ? c.first_batch_h : fmtLocal(addH(nowMinute(), +c.first_batch_h || 0));
+  $("f-batch_times").value = c.batch_times_h.join(", ");
+  editDowntimes = c.downtimes.map(w => [...w]);
+  renderChemDowntimes();
+  $("chem-del").hidden = i == null;
+  $("chem-del").classList.remove("armed"); $("chem-del").textContent = "Delete";
+  $("chem-err").hidden = true;
+  $("dlg-chem").showModal();
+}
+function renderChemDowntimes() { dtRows($("chem-dt"), editDowntimes, renderChemDowntimes, "cdt"); }
+
+$("chem-dt-add").addEventListener("click", () => {
+  const n = nowMinute(); editDowntimes.push([fmtLocal(addH(n, 24)), fmtLocal(addH(n, 32))]); renderChemDowntimes();
+});
+$("chem-form").addEventListener("submit", ev => {
+  ev.preventDefault();
+  const raw = { name: $("f-name").value.trim() || "Unnamed", supplier: $("f-supplier").value.trim(), next_delivery: $("f-next_delivery").value };
+  for (const f of NUM_FIELDS) raw[f] = $(`f-${f}`).value;
+  raw.first_batch_h = $("f-first_batch").value || 0;
+  raw.batch_times_h = $("f-batch_times").value.split(",").map(s => s.trim()).filter(Boolean);
+  raw.downtimes = editDowntimes.filter(([a, b]) => a && b);
+  const c = normChem(raw);
+  const start = nowMinute();
+  c.batch_times_h = c.batch_times_h.map(v => absolutize(v, start));
+  if (c.batch_times_h.some(v => isNaN(new Date(v)))) return showErr("chem-err", "One-off batches must be dates (2026-10-09T08:00) or hours from now, separated by commas.");
+  if (c.downtimes.some(([a, b]) => hoursBetween(a, b) <= 0)) return showErr("chem-err", "Each downtime must end after it starts.");
+  const err = validate(c);
+  if (err) return showErr("chem-err", err);
+  if (editing == null && state.chemicals.some(o => o.name === c.name)) return showErr("chem-err", `There's already a chemical called ${c.name}.`);
+  if (editing == null) state.chemicals.push(c);
+  else {
+    const old = state.chemicals[editing].name;
+    if (old !== c.name) state.deliveries.forEach(d => { if (d.chemical === old) d.chemical = c.name; });
+    state.chemicals[editing] = c;
+  }
+  $("dlg-chem").close();
+  update();
+  toast(editing == null ? `Added ${c.name}` : `Saved ${c.name}`);
+});
+$("chem-cancel").addEventListener("click", () => $("dlg-chem").close());
+$("chem-del").addEventListener("click", ev => {
+  const b = ev.currentTarget;
+  if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "Click again to delete"; return; }
+  const [gone] = state.chemicals.splice(editing, 1);
+  state.deliveries = state.deliveries.filter(d => d.chemical !== gone.name);
+  $("dlg-chem").close(); update(); toast(`Deleted ${gone.name}`);
+});
+function showErr(id, msg) { const el = $(id); el.textContent = msg; el.hidden = false; }
+
+/* ======================================================================
+   Import / export
+   ====================================================================== */
+const exportJSON = () => JSON.stringify({ horizon_h: state.horizon_h, step_min: state.step_min, downtimes: state.downtimes, downtime_rules: state.downtime_rules,
+  chemicals: state.chemicals, deliveries: state.deliveries, import_info: state.import_info }, null, 2);
+$("btn-io").addEventListener("click", () => {
+  $("io-text").value = exportJSON(); $("io-err").hidden = true;
+  $("io-reset").classList.remove("armed"); $("io-reset").textContent = "Reset to example";
+  $("dlg-io").showModal();
+});
+$("io-close").addEventListener("click", () => $("dlg-io").close());
+$("io-copy").addEventListener("click", () => copyText($("io-text").value, $("io-text")));
+$("io-apply").addEventListener("click", () => {
+  try {
+    const next = loadState(JSON.parse($("io-text").value));
+    const bad = next.chemicals.map(c => [c.name, validate(c)]).find(([, e]) => e);
+    if (bad) throw new Error(`${bad[0]}: ${bad[1]}`);
+    state = next; syncControls(); renderPlantDowntimes(); update();
+    $("dlg-io").close(); toast(`Loaded ${state.chemicals.length} chemicals`);
+  } catch (e) { showErr("io-err", e instanceof SyntaxError ? `That isn't valid JSON: ${e.message}` : e.message); }
+});
+$("io-file").addEventListener("change", ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { $("io-text").value = rd.result; $("io-err").hidden = true; toast("File loaded. Check it, then Apply."); };
+  rd.readAsText(f);
+});
+$("io-reset").addEventListener("click", ev => {
+  const b = ev.currentTarget;
+  if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "Click again to replace everything"; return; }
+  state = exampleState(); syncControls(); renderPlantDowntimes(); update();
+  $("dlg-io").close(); toast("Reset to example data");
+});
+
+function copyText(text, fallbackEl) {
+  const done = () => toast("Copied");
+  const fail = () => { if (fallbackEl) { fallbackEl.focus(); fallbackEl.select(); } toast("Couldn't copy automatically. Text is selected, press Ctrl+C."); };
+  try { navigator.clipboard.writeText(text).then(done, fail); } catch { fail(); }
+}
+$("btn-csv").addEventListener("click", () => {
+  const rows = renderSchedule.rows || [];
+  const iso = h => fmtLocal(addH(START, h)).replace("T", " ");
+  const q = s => `"${String(s).replace(/"/g, '""')}"`;
+  const csv = ["chemical,type,supplier,order_placed,arrives,level_at_arrival_kg,qty_kg,level_after_kg,wont_fit_kg",
+    ...rows.map(x => [q(x.name), { booked: "booked", pred: "predicted", ideal: "ideal" }[x.kind], q(x.supplier || ""), x.order != null ? iso(x.order) : "", iso(x.t),
+      Math.round(x.before), Math.round(x.qty), Math.round(x.after), Math.round(x.spill)].join(","))].join("\n");
+  copyText(csv);
+});
+
+/* ======================================================================
+   Booked deliveries list
+   ====================================================================== */
+function renderBooked() {
+  const names = new Set(state.chemicals.map(c => c.name));
+  const now = Date.now();
+  const list = state.deliveries.map((d, i) => ({ ...d, i, when: new Date(d.at) })).sort((a, b) => a.when - b.when);
+  $("booked").innerHTML = list.map(d => {
+    const past = d.when.getTime() <= now, beyond = (d.when - START) / 3.6e6 > state.horizon_h;
+    const note = !names.has(d.chemical) ? ` <span class="flag">no tank with this name</span>`
+      : past ? ` <span class="muted">(past, ignored)</span>` : beyond ? ` <span class="muted">(after horizon)</span>` : "";
+    return `<tr><td class="chem-name">${esc(d.chemical)}${note}</td>
+      <td class="num">${isNaN(d.when) ? esc(d.at) : dayFmt.format(d.when)}</td><td class="r num">${kg(d.qty)}</td>
+      <td>${esc(d.supplier || "—")}</td><td class="r"><button type="button" class="ghost" data-rmb="${d.i}">Remove</button></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No booked deliveries. Import your Excel delivery schedule or add one below.</td></tr>`;
+  const upcoming = list.filter(d => d.when.getTime() > now).length;
+  $("booked-count").textContent = `${upcoming} upcoming`;
+  const sel = $("bk-chem"), cur = sel.value;
+  sel.innerHTML = state.chemicals.map(c => `<option>${esc(c.name)}</option>`).join("");
+  if (names.has(cur)) sel.value = cur;
+  if (!$("bk-at").value) $("bk-at").value = fmtLocal(addH(nowMinute(), 24));
+}
+$("booked").addEventListener("click", e => {
+  const b = e.target.closest("[data-rmb]"); if (!b) return;
+  state.deliveries.splice(+b.dataset.rmb, 1); update();
+});
+$("booked-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const sup = $("bk-sup").value.trim() || (state.chemicals.find(c => c.name === $("bk-chem").value)?.supplier ?? "");
+  state.deliveries.push({ chemical: $("bk-chem").value, at: $("bk-at").value, qty: +$("bk-qty").value, supplier: sup });
+  $("bk-qty").value = ""; update(); toast("Delivery added");
+});
+
+function renderImportLine() {
+  const info = state.import_info;
+  $("import-line").textContent = info
+    ? `Last Excel import: ${info.file} · ${dayFmt.format(new Date(info.at))} · ${info.tanks} tanks, ${info.deliveries} deliveries`
+    : "No Excel import yet. Drop a workbook anywhere on the page.";
+}
+
+/* ======================================================================
+   Excel import
+   Sheets are found by their headers, so names and column order don't matter.
+   Tanks sheet:      Chemical | Current level | Tank max | LSL | LSH  (+ optional cushions, usage, lead time, supplier)
+   Deliveries sheet: Chemical | Qty | Day | Time | Supplier
+   ====================================================================== */
+const COLS = {
+  chemical: ["chemical", "chem", "chemicalname", "name", "product", "material", "tank", "tankname"],
+  level: ["currentlevel", "level", "currenttankamount", "tankamount", "current", "tanklevel", "currentkg", "inventory", "stock", "onhand", "currentamount", "currentstock"],
+  capacity: ["tankmax", "max", "capacity", "maxlevel", "tankcapacity", "tanksize", "maximum", "maxcapacity"],
+  lsl: ["lsl", "lowlevelswitch", "levelswitchlow", "lowlevel", "lowalarm"],
+  lsh: ["lsh", "highlevelswitch", "levelswitchhigh", "highlevel", "highalarm"],
+  lower_cushion: ["lowercushion", "lowcushion", "reorderpoint", "reorderlevel", "reorder"],
+  upper_cushion: ["uppercushion", "highcushion", "filltarget", "target", "filllevel"],
+  rate_kg_h: ["usage", "usagerate", "rate", "consumption", "consumptionrate", "kgh", "kgperhour"],
+  lead_time_h: ["leadtime", "lead", "leadtimeh", "leadtimehours"],
+  supplier: ["supplier", "vendor", "haulier", "carrier", "defaultsupplier"],
+  delivery_kg: ["deliverysize", "regularqty", "regulardelivery", "regulardeliveryqty", "standardqty", "standarddelivery", "deliveryamount", "orderqty", "orderquantity", "ordersize"],
+  delivery_every_days: ["deliveryevery", "deliveryeverydays", "frequency", "deliveryfrequency", "everydays", "frequencydays", "deliveryinterval", "interval", "every"],
+  qty: ["qty", "quantity", "deliveryqty", "deliveryquantity", "deliverykg", "amount", "kg", "volume", "load"],
+  day: ["day", "date", "deliverydate", "deliveryday", "arrivaldate", "arrival", "delivery"],
+  time: ["time", "deliverytime", "arrivaltime", "slot", "timeslot", "eta"],
+};
+const normH = s => String(s ?? "").toLowerCase().replace(/\(.*?\)|\[.*?\]/g, "").replace(/[^a-z0-9]/g, "");
+
+function mapHeader(row) {
+  const map = {}, hs = row.map(normH);
+  for (const pass of ["exact", "prefix"]) {
+    hs.forEach((h, ci) => {
+      if (!h || Object.values(map).includes(ci)) return;
+      for (const [key, syns] of Object.entries(COLS)) {
+        if (key in map) continue;
+        if (pass === "exact" ? syns.includes(h) : syns.some(s => s.length >= 3 && h.startsWith(s))) { map[key] = ci; break; }
+      }
+    });
+  }
+  return map;
+}
+function findTable(rows) {
+  let best = null;
+  rows.slice(0, 15).forEach((row, ri) => {
+    const map = mapHeader(row || []), n = Object.keys(map).length;
+    if (n >= 2 && "chemical" in map && (!best || n > best.n)) best = { ri, map, n };
+  });
+  return best;
+}
+
+const parseNum = v => {
+  if (typeof v === "number") return v;
+  if (v == null) return NaN;
+  const s = String(v).replace(/kg|\s/gi, "").replace(/,(?=\d{3}(\D|$))/g, "");
+  return s === "" ? NaN : +s.replace(",", ".");
+};
+function serialToParts(n) {
+  const u = new Date(Date.UTC(1899, 11, 30) + Math.round(n * 86400) * 1000);
+  return { y: u.getUTCFullYear(), mo: u.getUTCMonth(), d: u.getUTCDate(), h: u.getUTCHours(), mi: u.getUTCMinutes(), hasTime: n % 1 !== 0 };
+}
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+function parseDay(v, warn, label) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return serialToParts(v);
+  if (v instanceof Date) return { y: v.getFullYear(), mo: v.getMonth(), d: v.getDate(), h: v.getHours(), mi: v.getMinutes(), hasTime: !!(v.getHours() || v.getMinutes()) };
+  const s = String(v).trim().toLowerCase();
+  const today = nowMinute(); today.setHours(0, 0, 0, 0);
+  const rel = { today: 0, tomorrow: 1 }[s];
+  if (rel != null) { const t = addH(today, rel * 24); return { y: t.getFullYear(), mo: t.getMonth(), d: t.getDate(), hasTime: false }; }
+  const wd = WEEKDAYS.indexOf(s.slice(0, 3));
+  if (wd >= 0 && /^[a-z]+\.?$/.test(s)) {
+    const t = new Date(today); t.setDate(t.getDate() + ((wd - today.getDay() + 7) % 7));
+    return { y: t.getFullYear(), mo: t.getMonth(), d: t.getDate(), hasTime: false, weekday: true };
+  }
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ t](\d{1,2}):(\d{2}))?/);
+  if (m) return { y: +m[1], mo: +m[2] - 1, d: +m[3], h: +(m[4] || 0), mi: +(m[5] || 0), hasTime: !!m[4] };
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    let a = +m[1], b = +m[2], y = +m[3]; if (y < 100) y += 2000;
+    let d = a, mo = b;
+    if (a <= 12 && b > 12) { d = b; mo = a; }
+    else if (a <= 12 && b <= 12 && a !== b) warn(`${label}: read "${v}" as day/month/year.`);
+    return { y, mo: mo - 1, d, h: +(m[4] || 0), mi: +(m[5] || 0), hasTime: !!m[4] };
+  }
+  const t = new Date(String(v));
+  if (!isNaN(t)) return { y: t.getFullYear(), mo: t.getMonth(), d: t.getDate(), h: t.getHours(), mi: t.getMinutes(), hasTime: !!(t.getHours() || t.getMinutes()) };
+  return null;
+}
+function parseTime(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") {
+    if (v >= 1 && Number.isInteger(v) && v <= 2359 && v % 100 < 60) return { h: Math.floor(v / 100), mi: v % 100 }; // 800 → 08:00
+    const p = serialToParts(v % 1); return { h: p.h, mi: p.mi };
+  }
+  if (v instanceof Date) return { h: v.getHours(), mi: v.getMinutes() };
+  const s = String(v).trim().toLowerCase().replace(/\s+/g, "");
+  const m = s.match(/^(\d{1,2})(?:[:.h]?(\d{2}))?(?::\d{2})?(am|pm)?$/);
+  if (!m) return null;
+  let h = +m[1]; const mi = +(m[2] || 0);
+  if (m[3] === "pm" && h < 12) h += 12;
+  if (m[3] === "am" && h === 12) h = 0;
+  return h < 24 && mi < 60 ? { h, mi } : null;
+}
+
+function parseWorkbook(wb) {
+  const out = { tanks: [], deliveries: [], warnings: [], past: 0, sheets: {} };
+  const warn = w => out.warnings.push(w);
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: false });
+    const tbl = findTable(rows);
+    if (!tbl) continue;
+    const { map, ri } = tbl, get = (row, k) => (k in map ? row[map[k]] : null);
+    const isDeliv = "qty" in map && ("day" in map || "time" in map);
+    const isTank = !isDeliv && ("lsl" in map || "lsh" in map || "level" in map || "capacity" in map);
+    if (isTank && !out.sheets.tanks) {
+      out.sheets.tanks = name;
+      for (const k of ["level", "capacity", "lsl", "lsh"]) if (!(k in map)) warn(`Sheet "${name}" has no ${{ level: "current level", capacity: "tank max", lsl: "LSL", lsh: "LSH" }[k]} column.`);
+      rows.slice(ri + 1).forEach((row, i) => {
+        const chem = String(get(row, "chemical") ?? "").trim();
+        if (!chem) return;
+        const t = { name: chem };
+        for (const k of ["level", "capacity", "lsl", "lsh", "lower_cushion", "upper_cushion", "rate_kg_h", "lead_time_h", "delivery_kg", "delivery_every_days", "qty"]) {
+          const v = parseNum(get(row, k));
+          if (isFinite(v)) t[k] = v;
+          else if (k in map && get(row, k) != null && get(row, k) !== "") warn(`${name} row ${ri + i + 2}: couldn't read ${k.replace(/_/g, " ")} "${get(row, k)}".`);
+        }
+        if (t.delivery_kg == null && t.qty != null) t.delivery_kg = t.qty; // "Delivery qty" on the tank sheet = regular size
+        delete t.qty;
+        const sup = get(row, "supplier"); if (sup) t.supplier = String(sup).trim();
+        out.tanks.push(t);
+      });
+    } else if (isDeliv && !out.sheets.deliveries) {
+      out.sheets.deliveries = name;
+      const now = Date.now();
+      rows.slice(ri + 1).forEach((row, i) => {
+        const chem = String(get(row, "chemical") ?? "").trim();
+        if (!chem) return;
+        const label = `${name} row ${ri + i + 2}`;
+        const qty = parseNum(get(row, "qty"));
+        const day = parseDay(get(row, "day"), warn, label);
+        const tm = parseTime(get(row, "time"));
+        if (!isFinite(qty) || qty <= 0) return warn(`${label}: skipped ${chem}, quantity "${get(row, "qty") ?? ""}" isn't a number.`);
+        if (!day) return warn(`${label}: skipped ${chem}, couldn't read the day "${get(row, "day") ?? ""}".`);
+        let h = day.h || 0, mi = day.mi || 0;
+        if (tm) { h = tm.h; mi = tm.mi; }
+        else if (!day.hasTime) { h = 8; mi = 0; warn(`${label}: no time for ${chem}, assumed 08:00.`); }
+        let when = new Date(day.y, day.mo, day.d, h, mi);
+        if (day.weekday && when.getTime() <= now) when = addH(when, 24 * 7);
+        if (when.getTime() <= now) { out.past++; return; }
+        out.deliveries.push({ chemical: chem, at: fmtLocal(when), qty, supplier: String(get(row, "supplier") ?? "").trim() });
+      });
+    }
+  }
+  if (!out.sheets.tanks && !out.sheets.deliveries)
+    warn("Couldn't find a tank table or a delivery table. Check that the header row has columns like Chemical, Current level, LSL, LSH or Chemical, Qty, Day, Time, Supplier.");
+  return out;
+}
+
+/* Merge parsed workbook into a copy of state, so the preview can show the result before applying. */
+function mergeImport(parsed) {
+  const next = JSON.parse(JSON.stringify(state));
+  const byName = n => next.chemicals.find(c => c.name.toLowerCase() === n.toLowerCase());
+  const notes = [], warns = [...parsed.warnings];
+  let updated = 0, added = 0;
+  for (const t of parsed.tanks) {
+    let c = byName(t.name);
+    if (!c) {
+      const lsl = t.lsl ?? 0, lsh = t.lsh ?? t.capacity ?? 1000, span = lsh - lsl;
+      c = normChem({ name: t.name, lsl, lsh, capacity: t.capacity ?? null, level_kg: t.level ?? 0,
+        lower_cushion: Math.round(lsl + 0.2 * span), upper_cushion: Math.round(lsh - 0.1 * span), rate_kg_h: 0, first_batch_h: fmtLocal(nowMinute()) });
+      next.chemicals.push(c); added++;
+      if (t.rate_kg_h == null) warns.push(`${t.name} is new. Set its usage, because it's 0 kg/h for now.`);
+    } else updated++;
+    if (t.level != null) c.level_kg = t.level;
+    if (t.capacity != null) c.capacity = t.capacity;
+    for (const k of ["lsl", "lsh", "lower_cushion", "upper_cushion", "rate_kg_h", "lead_time_h", "supplier", "delivery_kg", "delivery_every_days"]) if (t[k] != null) c[k] = t[k];
+    const err = validate(c);
+    if (err) warns.push(`${c.name}: ${err} Edit it after importing.`);
+  }
+  if (parsed.sheets.deliveries) {
+    next.deliveries = [];
+    for (const d of parsed.deliveries) {
+      const c = byName(d.chemical);
+      if (!c) { warns.push(`Delivery of ${kg(d.qty)} kg ${d.chemical} skipped: no tank with that name.`); continue; }
+      next.deliveries.push({ ...d, chemical: c.name, supplier: d.supplier || c.supplier });
+    }
+  }
+  if (parsed.sheets.tanks) {
+    notes.push(`${parsed.tanks.length} tanks from sheet "${parsed.sheets.tanks}": ${updated} updated, ${added} new.`);
+    const missing = state.chemicals.filter(c => !parsed.tanks.some(t => t.name.toLowerCase() === c.name.toLowerCase())).map(c => c.name);
+    if (missing.length) notes.push(`Not in the file, left unchanged: ${missing.join(", ")}.`);
+  } else notes.push("No tank sheet found. Tank levels are unchanged.");
+  if (parsed.sheets.deliveries) notes.push(`${next.deliveries.length} upcoming deliveries from sheet "${parsed.sheets.deliveries}"${parsed.past ? `, ${parsed.past} in the past ignored` : ""}.`);
+  else notes.push("No delivery sheet found. Booked deliveries are unchanged.");
+  return { next, notes, warns };
+}
+
+let pendingImport = null;
+async function handleExcel(file) {
+  if (!window.XLSX) return toast("The Excel reader didn't load. Check your connection and reload.");
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array", raw: /\.csv$/i.test(file.name) });
+    const parsed = parseWorkbook(wb);
+    const { next, notes, warns } = mergeImport(parsed);
+    next.import_info = { file: file.name, at: new Date().toISOString(), tanks: parsed.tanks.length, deliveries: next.deliveries.length };
+    pendingImport = next;
+    $("xlsx-file-name").textContent = file.name;
+    $("xlsx-sum").innerHTML = notes.map(n => `<li>${esc(n)}</li>`).join("");
+    $("xlsx-warn").innerHTML = warns.map(w => `<li>${esc(w)}</li>`).join("");
+    $("xlsx-warn").hidden = !warns.length;
+    $("xlsx-apply").disabled = !parsed.sheets.tanks && !parsed.sheets.deliveries;
+    $("dlg-xlsx").showModal();
+  } catch (e) {
+    toast(`Couldn't read ${file.name}: ${e.message}`);
+  }
+}
+$("btn-xlsx").addEventListener("click", () => $("xlsx-file").click());
+$("xlsx-file").addEventListener("change", e => { const f = e.target.files[0]; if (f) handleExcel(f); e.target.value = ""; });
+$("xlsx-cancel").addEventListener("click", () => { pendingImport = null; $("dlg-xlsx").close(); });
+$("xlsx-apply").addEventListener("click", () => {
+  if (!pendingImport) return;
+  state = pendingImport; pendingImport = null;
+  $("dlg-xlsx").close(); syncControls(); renderPlantDowntimes(); update();
+  toast("Excel import applied");
+});
+
+// drop a workbook anywhere on the page
+let dragDepth = 0;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes("Files");
+addEventListener("dragenter", e => { if (!hasFiles(e)) return; dragDepth++; $("drop").hidden = false; });
+addEventListener("dragleave", e => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; $("drop").hidden = true; } });
+addEventListener("dragover", e => { if (hasFiles(e)) e.preventDefault(); });
+addEventListener("drop", e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; $("drop").hidden = true;
+  const f = e.dataTransfer.files[0];
+  if (f && /\.(xlsx|xlsm|xls|csv)$/i.test(f.name)) handleExcel(f);
+  else if (f && /\.json$/i.test(f.name)) f.text().then(t => { $("io-text").value = t; $("io-err").hidden = true; $("dlg-io").showModal(); });
+  else toast("Drop an Excel (.xlsx) or CSV file.");
+});
+
+/* ======================================================================
+   Wiring
+   ====================================================================== */
+function syncControls() {
+  const hz = $("horizon");
+  if (![...hz.options].some(o => +o.value === state.horizon_h)) hz.add(new Option(`${+(state.horizon_h / 24).toFixed(1)} days`, state.horizon_h));
+  hz.value = state.horizon_h; $("step").value = state.step_min;
+}
+$("horizon").addEventListener("change", e => { state.horizon_h = +e.target.value; update(); });
+$("step").addEventListener("change", e => { state.step_min = +e.target.value; update(); });
+$("btn-add").addEventListener("click", () => openEditor(null));
+$("plant-dt-add").addEventListener("click", () => {
+  const n = nowMinute(); state.downtimes.push([fmtLocal(addH(n, 48)), fmtLocal(addH(n, 60))]); renderPlantDowntimes(); update();
+});
+$("tabpanel").addEventListener("click", e => { const b = e.target.closest("[data-edit]"); if (b) openEditor(+b.dataset.edit); });
+$("tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) selectTab(b.dataset.tab); });
+$("tabs").addEventListener("keydown", e => {
+  const names = results.map(r => r.chem.name), i = names.indexOf(activeTab);
+  const j = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: names.length - 1 }[e.key];
+  if (j == null) return;
+  e.preventDefault();
+  selectTab(names[(j + names.length) % names.length], true);
+});
+$("summary").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-i]"); if (!tr) return;
+  selectTab(results[+tr.dataset.i].chem.name);
+  const sec = $("h-levels").closest("section");
+  sec.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+});
+$("plant-rule-add").addEventListener("click", () => {
+  const d = nowMinute(); d.setDate(d.getDate() + 1); d.setHours(6, 0, 0, 0);
+  state.downtime_rules.push({ label: "", every_days: 7, duration_h: 4, first: fmtLocal(d) }); renderPlantDowntimes(); update();
+});
+// redraw charts when the theme changes so their colors follow
+const redraw = () => (page === "deliveries" ? renderSchedule() : renderCards());
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+/* Pages: #tanks (default) and #deliveries */
+let page = "tanks";
+function showPage() {
+  page = location.hash === "#deliveries" ? "deliveries" : "tanks";
+  $("page-tanks").hidden = page !== "tanks";
+  $("page-deliveries").hidden = page !== "deliveries";
+  document.querySelectorAll(".pages a").forEach(a => {
+    if (a.dataset.page === page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  // charts can't size themselves while hidden: draw the visible page's chart now
+  if (page === "deliveries") renderSchedule(); else renderCards();
+}
+addEventListener("hashchange", showPage);
+document.querySelectorAll(".ideal-toggle").forEach(cb => cb.addEventListener("change", () => setIdeal(cb.checked)));
+$("sched-filter").addEventListener("change", e => { schedFilter = e.target.value; renderSchedule(); });
+
+syncControls();
+renderPlantDowntimes();
+recompute();
+setIdeal(showIdeal);
+showPage();
+renderSummary(); renderBooked(); renderImportLine();
+</script>
